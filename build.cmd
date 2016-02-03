@@ -37,5 +37,4 @@ echo Downloading latest version of Nyx...
 SET TARGET="Build"
 IF NOT [%1]==[] (set TARGET="%1")
 
-%FAKE% %NYX% "target=%TARGET%" solution=Elders.Pandora.vNext appName=Elders.Pandora.Box.vNext appReleaseNotes=./src/RELEASE_NOTES.md
-%FAKE% %NYX% "target=%TARGET%" solution=Elders.Pandora.vNext appName=Elders.Pandora.vNext appReleaseNotes=./src/RELEASE_NOTES.md
+%FAKE% %NYX% "target=%TARGET%" solution=Pandora.Server.Api appName=Pandora.Server.Api appReleaseNotes=./src/RELEASE_NOTES.md
