@@ -1,21 +1,173 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using Microsoft.AspNet.Authentication;
 using Microsoft.AspNet.Authentication.JwtBearer;
+using Microsoft.AspNet.Authorization;
+using Microsoft.AspNet.Authorization.Infrastructure;
 using Microsoft.AspNet.Builder;
 using Microsoft.AspNet.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.AspNet.Authentication;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
-using System;
-using System.Security.Claims;
-using System.Linq;
 using Elders.Pandora.Server.Api.AuthenticationMiddleware;
 using Elders.Pandora.Server.Api.ViewModels;
 
 namespace Elders.Pandora.Server.Api
 {
+    public class Resource
+    {
+        public string ProjectName { get; set; }
+
+        public string ConfigurationName { get; set; }
+
+        public string ClusterName { get; set; }
+
+        public string MachineName { get; set; }
+
+        public Access Access { get; set; }
+    }
+
+    public class ResourceAuthorizationHandler : AuthorizationHandler<OperationAuthorizationRequirement, Resource>
+    {
+        protected override void Handle(AuthorizationContext context, OperationAuthorizationRequirement requirement, Resource resource)
+        {
+            var securityAccessClaim = context.User.Claims.SingleOrDefault(x => x.Type == "SecurityAccess");
+
+            SecurityAccess security;
+
+            if (securityAccessClaim == null || string.IsNullOrWhiteSpace(securityAccessClaim.Value))
+                security = new SecurityAccess();
+            else
+                security = JsonConvert.DeserializeObject<SecurityAccess>(securityAccessClaim.Value);
+
+            if (security == null)
+                security = new SecurityAccess();
+
+            if (string.IsNullOrWhiteSpace(resource.MachineName) == false)
+            {
+                var project = security.Projects.SingleOrDefault(x => x.Name == resource.ProjectName);
+                if (project == null)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                var configuration = project.Applications.SingleOrDefault(x => x.Name == resource.ConfigurationName);
+                if (configuration == null)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                if (configuration.Access.HasAccess(resource.Access) == false)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                var cluster = configuration.Clusters.SingleOrDefault(x => x.Name == resource.ClusterName);
+                if (cluster == null)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                if (cluster.Access.HasAccess(resource.Access) == false)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                context.Succeed(requirement);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(resource.ClusterName) == false)
+            {
+                var project = security.Projects.SingleOrDefault(x => x.Name == resource.ProjectName);
+                if (project == null)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                var configuration = project.Applications.SingleOrDefault(x => x.Name == resource.ConfigurationName);
+                if (configuration == null)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                if (configuration.Access.HasAccess(resource.Access) == false)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                var cluster = configuration.Clusters.SingleOrDefault(x => x.Name == resource.ClusterName);
+                if (cluster == null)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                if (cluster.Access.HasAccess(resource.Access) == false)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                context.Succeed(requirement);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(resource.ConfigurationName) == false)
+            {
+                var project = security.Projects.SingleOrDefault(x => x.Name == resource.ProjectName);
+                if (project == null)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                var configuration = project.Applications.SingleOrDefault(x => x.Name == resource.ConfigurationName);
+                if (configuration == null)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                if (configuration.Access.HasAccess(resource.Access) == false)
+                {
+                    context.Fail();
+                    return;
+                }
+
+                context.Succeed(requirement);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(resource.ProjectName) == false)
+            {
+                //var project = security.Projects.SingleOrDefault(x => x.Name == resource.ProjectName);
+                //if (project == null)
+                //{
+                //    context.Fail();
+                //    return;
+                //}
+
+                context.Succeed(requirement);
+                return;
+            }
+
+            context.Fail();
+        }
+    }
+
     public class Startup
     {
         public Startup(IHostingEnvironment env)
@@ -32,6 +184,7 @@ namespace Elders.Pandora.Server.Api
         public void ConfigureServices(IServiceCollection services)
         {
             // Add framework services.
+            services.AddInstance<IAuthorizationHandler>(new ResourceAuthorizationHandler());
             services.AddMvc();
         }
 
@@ -40,7 +193,7 @@ namespace Elders.Pandora.Server.Api
         {
             app.UseIISPlatformHandler();
 
-            ApplicationConfiguration.SetContext("Elders.Pandora.Api");
+            ApplicationConfiguration.SetContext("Elders.Pandora.Server.Api");
 
             foreach (var directory in new[] { Folders.Main, Folders.Users, Folders.Projects })
             {
@@ -108,9 +261,9 @@ namespace Elders.Pandora.Server.Api
 
             User user = null;
 
-            if (System.IO.File.Exists(userFilePath))
+            if (File.Exists(userFilePath))
             {
-                user = JsonConvert.DeserializeObject<User>(System.IO.File.ReadAllText(userFilePath));
+                user = JsonConvert.DeserializeObject<User>(File.ReadAllText(userFilePath));
             }
 
             if (user == null)
@@ -131,13 +284,13 @@ namespace Elders.Pandora.Server.Api
 
             var userFilePath = Path.Combine(workingDir, user.Id + ".json");
 
-            if (!System.IO.File.Exists(userFilePath))
+            if (!File.Exists(userFilePath))
             {
                 Directory.CreateDirectory(Path.Combine(workingDir));
 
                 var serializedUser = JsonConvert.SerializeObject(user, Formatting.Indented);
 
-                System.IO.File.WriteAllText(userFilePath, serializedUser);
+                File.WriteAllText(userFilePath, serializedUser);
             }
         }
     }

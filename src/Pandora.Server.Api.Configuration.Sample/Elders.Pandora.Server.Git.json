@@ -1,0 +1,22 @@
+﻿{
+    "name": "Elders.Pandora.Server.Git",
+    "defaults": {
+        "pandora_git_email": "",
+        "pandora_git_username": "",
+        "pandora_git_password": ""
+    },
+    "clusters": {
+        "local": {
+            "pandora_git_email": "",
+            "pandora_git_username": "",
+            "pandora_git_password": ""
+        }
+    },
+    "machines": {
+         "machine-name": {
+            "pandora_git_email": "",
+            "pandora_git_username": "",
+            "pandora_git_password": ""
+         }
+    }
+}

@@ -45,7 +45,7 @@ namespace Elders.Pandora.Server.Api.ViewModels
 
         public List<MachineDTO> Machines { get; set; }
 
-        public DefaultsDTO Defaults { get; set; }
+        public Dictionary<string, string> Defaults { get; set; }
 
         private List<ClusterDTO> GetAllClusters()
         {
@@ -90,14 +90,14 @@ namespace Elders.Pandora.Server.Api.ViewModels
             return machines;
         }
 
-        private DefaultsDTO GetDefaults()
+        private Dictionary<string, string> GetDefaults()
         {
             var app = SecurityAccess.Projects.SingleOrDefault(x => x.Name == this.ProjectName).Applications.SingleOrDefault(x => x.Name == this.ApplicationName);
 
             if (!app.Access.HasAccess(Access.ReadAcccess))
-                return new DefaultsDTO(app, new Dictionary<string, string>());
+                return new Dictionary<string, string>();
 
-            return new DefaultsDTO(app, box.Defaults.AsDictionary());
+            return box.Defaults.AsDictionary();
         }
 
         private SecurityAccess GetSecurityAccess()

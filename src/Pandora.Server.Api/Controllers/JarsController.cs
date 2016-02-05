@@ -3,19 +3,56 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using Elders.Pandora.Box;
+using Elders.Pandora.Server.Api.Common;
 using Microsoft.AspNet.Authorization;
+using Microsoft.AspNet.Authorization.Infrastructure;
 using Microsoft.AspNet.Mvc;
 using Newtonsoft.Json;
 
 namespace Elders.Pandora.Server.Api.Controllers
 {
-    [Authorize(Roles = "superAdmin")]
     [Route("api/[controller]")]
     public class JarsController : Controller
     {
         static readonly log4net.ILog log = log4net.LogManager.GetLogger(typeof(JarsController));
 
+        IAuthorizationService authorizationService;
+
+        public JarsController(IAuthorizationService authorizationService)
+        {
+            this.authorizationService = authorizationService;
+        }
+
+        [Authorize]
+        [HttpGet("ListJars/{projectName}")]
+        public async Task<IEnumerable<string>> ListJars(string projectName)
+        {
+            string projectPath = Path.Combine(Folders.Projects, projectName, "src", projectName + ".Configuration", "public");
+
+            var configurations = Directory.GetFiles(projectPath).Where(x => x.EndsWith(".json", StringComparison.Ordinal));
+
+            var jars = new List<string>();
+
+            foreach (var config in configurations)
+            {
+                var fileInfo = new FileInfo(config);
+
+                var configName = fileInfo.Name.Replace(fileInfo.Extension, string.Empty);
+
+                if (await authorizationService.AuthorizeAsync(User,
+                    new Resource() { ProjectName = projectName, ConfigurationName = configName, Access = ViewModels.Access.ReadAcccess },
+                    new OperationAuthorizationRequirement() { Name = "Read" }))
+                {
+                    jars.Add(configName);
+                }
+            }
+
+            return jars;
+        }
+
+        [Authorize(Roles = "superAdmin")]
         [HttpGet("{projectName}")]
         public IEnumerable<Jar> Get(string projectName)
         {
@@ -43,6 +80,7 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
+        [Authorize(Roles = "superAdmin")]
         [HttpGet("{projectName}/{configurationName}")]
         public Jar Get(string projectName, string configurationName)
         {
@@ -64,6 +102,7 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
+        [Authorize(Roles = "superAdmin")]
         [HttpPost("{projectName}/{configurationName}")]
         public void Post(string projectName, string configurationName, [FromBody]string value)
         {
@@ -110,6 +149,7 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
+        [Authorize(Roles = "superAdmin")]
         [HttpPut("{projectName}/{configurationName}")]
         public void Put(string projectName, string configurationName, [FromBody]string value)
         {
@@ -156,6 +196,7 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
+        [Authorize(Roles = "superAdmin")]
         [HttpDelete("{projectName}/{configurationName}")]
         public void Delete(string projectName, string configurationName)
         {

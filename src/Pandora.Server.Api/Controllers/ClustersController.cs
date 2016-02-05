@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using Elders.Pandora.Box;
 using Microsoft.AspNet.Authorization;
+using Microsoft.AspNet.Authorization.Infrastructure;
 using Microsoft.AspNet.Mvc;
 using Newtonsoft.Json;
 
@@ -16,13 +18,21 @@ namespace Elders.Pandora.Server.Api.Controllers
     {
         static readonly log4net.ILog log = log4net.LogManager.GetLogger(typeof(ClustersController));
 
-        [HttpGet("{projectName}/{configurationName}")]
-        public List<Cluster> Get(string projectName, string configurationName)
+        IAuthorizationService authorizationService;
+
+        public ClustersController(IAuthorizationService authorizationService)
+        {
+            this.authorizationService = authorizationService;
+        }
+
+        [HttpGet("ListClusters/{projectName}/{configurationName}")]
+        public async Task<IEnumerable<string>> ListClusters(string projectName, string configurationName)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
-                    return new List<Cluster>();
+                    return new List<string>();
+
 
                 var configurationPath = GetConfigurationFile(projectName, configurationName);
 
@@ -30,7 +40,56 @@ namespace Elders.Pandora.Server.Api.Controllers
 
                 var box = Box.Box.Mistranslate(cfg);
 
-                return box.Clusters;
+                var clusters = new List<string>();
+
+                foreach (var cluster in box.Clusters)
+                {
+                    if (await authorizationService.AuthorizeAsync(User,
+                        new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = cluster.Name, Access = ViewModels.Access.ReadAcccess },
+                        new OperationAuthorizationRequirement() { Name = "Read" }))
+                    {
+                        clusters.Add(cluster.Name);
+                    }
+                }
+
+                return clusters;
+            }
+            catch (Exception ex)
+            {
+                log.Fatal(ex);
+
+                throw;
+            }
+        }
+
+        [HttpGet("{projectName}/{configurationName}")]
+        public async Task<IEnumerable<Cluster>> Get(string projectName, string configurationName)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
+                    return new List<Cluster>();
+
+
+                var configurationPath = GetConfigurationFile(projectName, configurationName);
+
+                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
+
+                var box = Box.Box.Mistranslate(cfg);
+
+                var clusters = new List<Cluster>();
+
+                foreach (var cluster in box.Clusters)
+                {
+                    if (await authorizationService.AuthorizeAsync(User,
+                        new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = cluster.Name, Access = ViewModels.Access.ReadAcccess },
+                        new OperationAuthorizationRequirement() { Name = "Read" }))
+                    {
+                        clusters.Add(cluster);
+                    }
+                }
+
+                return clusters;
             }
             catch (Exception ex)
             {
@@ -41,25 +100,44 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [HttpGet("{projectName}/{configurationName}/{clusterName}")]
-        public Cluster Get(string projectName, string configurationName, string clusterName)
+        public async Task<Dictionary<string, string>> Get(string projectName, string configurationName, string clusterName)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(clusterName))
                     return null;
 
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
+                if (await authorizationService.AuthorizeAsync(User,
+                       new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = clusterName, Access = ViewModels.Access.ReadAcccess },
+                       new OperationAuthorizationRequirement() { Name = "Read" }))
+                {
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
 
-                var box = Box.Box.Mistranslate(cfg);
+                    var box = Box.Box.Mistranslate(cfg);
 
-                var cluster = box.Clusters.SingleOrDefault(x => x.Name == clusterName);
+                    var pandora = new Pandora(box);
 
-                if (cluster == null)
-                    return null;
+                    var cluster = box.Clusters.SingleOrDefault(x => x.Name == clusterName);
 
-                return cluster;
+                    if (cluster == null)
+                        return new Dictionary<string, string>();
+
+                    var defaults = box.Defaults.AsDictionary();
+
+                    var settings = cluster.AsDictionary();
+
+                    foreach (var setting in defaults)
+                    {
+                        if (settings.ContainsKey(setting.Key) == false)
+                            settings.Add(setting.Key, setting.Value);
+                    }
+
+                    return settings;
+                }
+
+                return new Dictionary<string, string>();
             }
             catch (Exception ex)
             {
@@ -70,45 +148,53 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [HttpPost("{projectName}/{configurationName}")]
-        public void Post(string projectName, string configurationName, [FromBody]string value)
+        public async void Post(string projectName, string configurationName, [FromBody]string value)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
                     return;
 
-                var projectPath = Path.Combine(Folders.Projects, projectName);
-
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
-
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
-
-                var box = Box.Box.Mistranslate(cfg);
-
                 var newCluster = JsonConvert.DeserializeObject<Cluster>(value);
 
-                var clusters = box.Clusters.ToList();
+                if (newCluster == null)
+                    return;
 
-                if (!clusters.Any(x => x.Name == newCluster.Name))
+                if (await authorizationService.AuthorizeAsync(User,
+                      new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = newCluster.Name, Access = ViewModels.Access.WriteAccess },
+                      new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
-                    clusters.Add(newCluster);
+                    var projectPath = Path.Combine(Folders.Projects, projectName);
 
-                    box.Clusters = clusters;
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                    var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box));
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
 
-                    System.IO.File.WriteAllText(configurationPath, jar);
+                    var box = Box.Box.Mistranslate(cfg);
 
-                    var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
-                    var username = nameClaim != null ? nameClaim.Value : "no name claim";
-                    var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
-                    var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                    var message = "Added cluster " + newCluster.Name + " in " + configurationName + " in project " + projectName;
+                    var clusters = box.Clusters.ToList();
 
-                    var git = new Git(projectPath);
-                    git.Stage(new List<string>() { configurationPath });
-                    git.Commit(message, username, email);
-                    git.Push();
+                    if (!clusters.Any(x => x.Name == newCluster.Name))
+                    {
+                        clusters.Add(newCluster);
+
+                        box.Clusters = clusters;
+
+                        var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box));
+
+                        System.IO.File.WriteAllText(configurationPath, jar);
+
+                        var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
+                        var username = nameClaim != null ? nameClaim.Value : "no name claim";
+                        var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
+                        var email = emailClaim != null ? emailClaim.Value : "no email claim";
+                        var message = "Added cluster " + newCluster.Name + " in " + configurationName + " in project " + projectName;
+
+                        var git = new Git(projectPath);
+                        git.Stage(new List<string>() { configurationPath });
+                        git.Commit(message, username, email);
+                        git.Push();
+                    }
                 }
             }
             catch (Exception ex)
@@ -120,49 +206,58 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [HttpPut("{projectName}/{configurationName}")]
-        public void Put(string projectName, string configurationName, [FromBody]string value)
+        public async void Put(string projectName, string configurationName, [FromBody]string value)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
                     return;
 
-                var projectPath = Path.Combine(Folders.Projects, projectName);
-
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
-
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
-
-                var box = Box.Box.Mistranslate(cfg);
-
                 var newCluster = JsonConvert.DeserializeObject<Cluster>(value);
 
-                var clusters = box.Clusters.ToList();
+                if (newCluster == null)
+                    return;
 
-                var existing = clusters.FirstOrDefault(x => x.Name == newCluster.Name);
-
-                if (existing != null)
+                if (await authorizationService.AuthorizeAsync(User,
+                      new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = newCluster.Name, Access = ViewModels.Access.WriteAccess },
+                      new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
-                    clusters.Remove(existing);
 
-                    clusters.Add(newCluster);
+                    var projectPath = Path.Combine(Folders.Projects, projectName);
 
-                    box.Clusters = clusters;
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                    var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
 
-                    System.IO.File.WriteAllText(configurationPath, jar);
+                    var box = Box.Box.Mistranslate(cfg);
 
-                    var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
-                    var username = nameClaim != null ? nameClaim.Value : "no name claim";
-                    var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
-                    var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                    var message = "Updated cluster " + newCluster.Name + " in " + configurationName + " in project " + projectName;
+                    var clusters = box.Clusters.ToList();
 
-                    var git = new Git(projectPath);
-                    git.Stage(new List<string>() { configurationPath });
-                    git.Commit(message, username, email);
-                    git.Push();
+                    var existing = clusters.FirstOrDefault(x => x.Name == newCluster.Name);
+
+                    if (existing != null)
+                    {
+                        clusters.Remove(existing);
+
+                        clusters.Add(newCluster);
+
+                        box.Clusters = clusters;
+
+                        var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+
+                        System.IO.File.WriteAllText(configurationPath, jar);
+
+                        var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
+                        var username = nameClaim != null ? nameClaim.Value : "no name claim";
+                        var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
+                        var email = emailClaim != null ? emailClaim.Value : "no email claim";
+                        var message = "Updated cluster " + newCluster.Name + " in " + configurationName + " in project " + projectName;
+
+                        var git = new Git(projectPath);
+                        git.Stage(new List<string>() { configurationPath });
+                        git.Commit(message, username, email);
+                        git.Push();
+                    }
                 }
             }
             catch (Exception ex)
@@ -174,45 +269,50 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [HttpDelete("{projectName}/{configurationName}/{clusterName}")]
-        public void Delete(string projectName, string configurationName, string clusterName)
+        public async void Delete(string projectName, string configurationName, string clusterName)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(clusterName))
                     return;
 
-                var projectPath = Path.Combine(Folders.Projects, projectName);
-
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
-
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
-
-                var box = Box.Box.Mistranslate(cfg);
-
-                var clusters = box.Clusters.ToList();
-
-                var existing = clusters.FirstOrDefault(x => x.Name == clusterName);
-
-                if (existing != null)
+                if (await authorizationService.AuthorizeAsync(User,
+                      new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = clusterName, Access = ViewModels.Access.WriteAccess },
+                      new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
-                    clusters.Remove(existing);
+                    var projectPath = Path.Combine(Folders.Projects, projectName);
 
-                    box.Clusters = clusters;
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                    var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
 
-                    System.IO.File.WriteAllText(configurationPath, jar);
+                    var box = Box.Box.Mistranslate(cfg);
 
-                    var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
-                    var username = nameClaim != null ? nameClaim.Value : "no name claim";
-                    var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
-                    var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                    var message = "Removed cluster " + clusterName + " from " + configurationName + " in " + projectName;
+                    var clusters = box.Clusters.ToList();
 
-                    var git = new Git(projectPath);
-                    git.Stage(new List<string>() { configurationPath });
-                    git.Commit(message, username, email);
-                    git.Push();
+                    var existing = clusters.FirstOrDefault(x => x.Name == clusterName);
+
+                    if (existing != null)
+                    {
+                        clusters.Remove(existing);
+
+                        box.Clusters = clusters;
+
+                        var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+
+                        System.IO.File.WriteAllText(configurationPath, jar);
+
+                        var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
+                        var username = nameClaim != null ? nameClaim.Value : "no name claim";
+                        var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
+                        var email = emailClaim != null ? emailClaim.Value : "no email claim";
+                        var message = "Removed cluster " + clusterName + " from " + configurationName + " in " + projectName;
+
+                        var git = new Git(projectPath);
+                        git.Stage(new List<string>() { configurationPath });
+                        git.Commit(message, username, email);
+                        git.Push();
+                    }
                 }
             }
             catch (Exception ex)

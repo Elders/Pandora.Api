@@ -1,0 +1,22 @@
+{
+  "name": "Elders.Pandora.Server.Api",
+  "references": [
+    { "jar": "Elders.Pandora.Server.Git.json" },
+    { "jar": "Elders.Pandora.Server.Authentication.json" }
+  ],
+  "defaults": {
+    "pandora_folder": "C:/ProgramData/Elders/Pandora",
+    "pandora_users_folder": "C:/ProgramData/Elders/Pandora/Users",
+    "pandora_projects_folder": "C:/ProgramData/Elders/Pandora/Projects",
+    "super_admin_users": ""
+  },
+  "clusters": {
+    "local": {
+    }
+  },
+  "machines": {
+    "WSBPPLDSD04": {
+      "super_admin_users": "blagovest.vp@gmail.com"
+    }
+  }
+}

@@ -246,3 +246,4 @@ $RECYCLE.BIN/
 Elders.Pandora.Authentication.json
 Elders.Pandora.Git.json
 AssemblyInfo.cs
+**/Pandora.Server.Api.Configuration/*

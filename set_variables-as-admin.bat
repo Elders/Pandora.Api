@@ -1,7 +1,6 @@
 echo off
 @setlocal enableextensions
 cd /d "%~dp0"
-CALL build.cmd
 
 SET NUGET=%LocalAppData%\NuGet\NuGet.exe
 
@@ -17,8 +16,8 @@ set host=%COMPUTERNAME%
 echo MachineName %host%
 setlocal enabledelayedexpansion
 
-@cd /d "%~dp0"\bin\Release\Elders.Pandora.Configuration\_publishedConfiguration\Elders.Pandora.Configuration
-CALL :setVaraiabless Elders.Pandora.Api.json Elders.Pandora.Api
+@cd /d "%~dp0"\src\Pandora.Server.Api.Configuration
+CALL :setVaraiabless Elders.Pandora.Server.Api.json Elders.Pandora.Server.Api
 
 echo
 

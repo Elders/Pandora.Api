@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using Elders.Pandora.Box;
 using Microsoft.AspNet.Authorization;
+using Microsoft.AspNet.Authorization.Infrastructure;
 using Microsoft.AspNet.Mvc;
 using Newtonsoft.Json;
 
@@ -16,10 +18,17 @@ namespace Elders.Pandora.Server.Api.Controllers
     {
         static readonly log4net.ILog log = log4net.LogManager.GetLogger(typeof(MachinesController));
 
-        [HttpGet("{projectName}/{configurationName}/{clusterName}/{machineName}")]
-        public Machine Get(string projectName, string configurationName, string clusterName, string machineName)
+        IAuthorizationService authorizationService;
+
+        public MachinesController(IAuthorizationService authorizationService)
         {
-            if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(clusterName) || string.IsNullOrWhiteSpace(machineName))
+            this.authorizationService = authorizationService;
+        }
+
+        [HttpGet("ListMachines/{projectName}/{configurationName}/{clusterName}")]
+        public async Task<IEnumerable<string>> Get(string projectName, string configurationName, string clusterName)
+        {
+            if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(clusterName))
                 return null;
 
             var projectPath = Path.Combine(Folders.Projects, projectName);
@@ -30,17 +39,31 @@ namespace Elders.Pandora.Server.Api.Controllers
 
             var box = Box.Box.Mistranslate(cfg);
 
-            return box.Machines.SingleOrDefault(x => x.Name == machineName);
+            var machines = new List<string>();
+
+            foreach (var machine in box.Machines)
+            {
+                if (await authorizationService.AuthorizeAsync(User,
+                  new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = clusterName, MachineName = machine.Name, Access = ViewModels.Access.ReadAcccess },
+                  new OperationAuthorizationRequirement() { Name = "Read" }))
+                {
+                    machines.Add(machine.Name);
+                }
+            }
+
+            return machines;
         }
 
-        [HttpPost("{projectName}/{configurationName}")]
-        public void Post(string projectName, string configurationName, [FromBody]string value)
+        [HttpGet("{projectName}/{configurationName}/{clusterName}/{machineName}")]
+        public async Task<Dictionary<string, string>> Get(string projectName, string configurationName, string clusterName, string machineName)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
-                    return;
+            if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(clusterName) || string.IsNullOrWhiteSpace(machineName))
+                return null;
 
+            if (await authorizationService.AuthorizeAsync(User,
+                  new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = clusterName, MachineName = machineName, Access = ViewModels.Access.ReadAcccess },
+                  new OperationAuthorizationRequirement() { Name = "Read" }))
+            {
                 var projectPath = Path.Combine(Folders.Projects, projectName);
 
                 var configurationPath = GetConfigurationFile(projectName, configurationName);
@@ -49,30 +72,82 @@ namespace Elders.Pandora.Server.Api.Controllers
 
                 var box = Box.Box.Mistranslate(cfg);
 
-                var newMachine = JsonConvert.DeserializeObject<Machine>(value);
+                var pandora = new Pandora(box);
 
-                var machines = box.Machines.ToList();
+                var cluster = box.Clusters.SingleOrDefault(x => x.Name == clusterName);
 
-                if (!machines.Any(x => x.Name == newMachine.Name))
+                var machine = box.Machines.SingleOrDefault(x => x.Name == machineName);
+
+                var clusterSettings = cluster.AsDictionary();
+
+                var defaults = box.Defaults.AsDictionary();
+
+                var settings = machine.AsDictionary();
+
+                foreach (var setting in defaults)
                 {
-                    machines.Add(newMachine);
+                    if (clusterSettings.ContainsKey(setting.Key) == false)
+                    {
+                        clusterSettings.Add(setting.Key, setting.Value);
+                    }
+                }
 
-                    box.Machines = machines;
+                foreach (var setting in settings)
+                {
+                    clusterSettings[setting.Key] = setting.Value;
+                }
 
-                    var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+                return clusterSettings;
+            }
 
-                    System.IO.File.WriteAllText(configurationPath, jar);
+            return null;
+        }
 
-                    var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
-                    var username = nameClaim != null ? nameClaim.Value : "no name claim";
-                    var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
-                    var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                    var message = "Added new machine " + newMachine.Name + " in " + configurationName + " in " + projectName;
+        [HttpPost("{projectName}/{configurationName}")]
+        public async void Post(string projectName, string configurationName, [FromBody]string value)
+        {
+            try
+            {
+                if (await authorizationService.AuthorizeAsync(User,
+                    new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.WriteAccess },
+                    new OperationAuthorizationRequirement() { Name = "Write" }))
+                {
+                    if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
+                        return;
 
-                    var git = new Git(projectPath);
-                    git.Stage(new List<string>() { configurationPath });
-                    git.Commit(message, username, email);
-                    git.Push();
+                    var projectPath = Path.Combine(Folders.Projects, projectName);
+
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
+
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
+
+                    var box = Box.Box.Mistranslate(cfg);
+
+                    var newMachine = JsonConvert.DeserializeObject<Machine>(value);
+
+                    var machines = box.Machines.ToList();
+
+                    if (!machines.Any(x => x.Name == newMachine.Name))
+                    {
+                        machines.Add(newMachine);
+
+                        box.Machines = machines;
+
+                        var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+
+                        System.IO.File.WriteAllText(configurationPath, jar);
+
+                        var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
+                        var username = nameClaim != null ? nameClaim.Value : "no name claim";
+                        var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
+                        var email = emailClaim != null ? emailClaim.Value : "no email claim";
+                        var message = "Added new machine " + newMachine.Name + " in " + configurationName + " in " + projectName;
+
+                        var git = new Git(projectPath);
+                        git.Stage(new List<string>() { configurationPath });
+                        git.Commit(message, username, email);
+                        git.Push();
+                    }
                 }
             }
             catch (Exception ex)
@@ -83,49 +158,54 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [HttpPut("{projectName}/{configurationName}")]
-        public void Put(string projectName, string configurationName, [FromBody]string value)
+        public async void Put(string projectName, string configurationName, [FromBody]string value)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
                     return;
 
-                var projectPath = Path.Combine(Folders.Projects, projectName);
-
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
-
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
-
-                var box = Box.Box.Mistranslate(cfg);
-
-                var newMachine = JsonConvert.DeserializeObject<Machine>(value);
-
-                var machines = box.Machines.ToList();
-
-                var existing = machines.FirstOrDefault(x => x.Name == newMachine.Name);
-
-                if (existing != null)
+                if (await authorizationService.AuthorizeAsync(User,
+                    new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.WriteAccess },
+                    new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
-                    machines.Remove(existing);
+                    var projectPath = Path.Combine(Folders.Projects, projectName);
 
-                    machines.Add(newMachine);
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                    box.Machines = machines;
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
 
-                    var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+                    var box = Box.Box.Mistranslate(cfg);
 
-                    System.IO.File.WriteAllText(configurationPath, jar);
+                    var newMachine = JsonConvert.DeserializeObject<Machine>(value);
 
-                    var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
-                    var username = nameClaim != null ? nameClaim.Value : "no name claim";
-                    var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
-                    var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                    var message = "Updated machine " + newMachine.Name + " in " + configurationName + " in " + projectName;
+                    var machines = box.Machines.ToList();
 
-                    var git = new Git(projectPath);
-                    git.Stage(new List<string>() { configurationPath });
-                    git.Commit(message, username, email);
-                    git.Push();
+                    var existing = machines.FirstOrDefault(x => x.Name == newMachine.Name);
+
+                    if (existing != null)
+                    {
+                        machines.Remove(existing);
+
+                        machines.Add(newMachine);
+
+                        box.Machines = machines;
+
+                        var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+
+                        System.IO.File.WriteAllText(configurationPath, jar);
+
+                        var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
+                        var username = nameClaim != null ? nameClaim.Value : "no name claim";
+                        var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
+                        var email = emailClaim != null ? emailClaim.Value : "no email claim";
+                        var message = "Updated machine " + newMachine.Name + " in " + configurationName + " in " + projectName;
+
+                        var git = new Git(projectPath);
+                        git.Stage(new List<string>() { configurationPath });
+                        git.Commit(message, username, email);
+                        git.Push();
+                    }
                 }
             }
             catch (Exception ex)
@@ -136,45 +216,50 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [HttpDelete("{projectName}/{configurationName}")]
-        public void Delete(string projectName, string configurationName, string machineName)
+        public async void Delete(string projectName, string configurationName, string machineName)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(machineName))
                     return;
 
-                var projectPath = Path.Combine(Folders.Projects, projectName);
-
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
-
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
-
-                var box = Box.Box.Mistranslate(cfg);
-
-                var machines = box.Machines.ToList();
-
-                var existing = machines.FirstOrDefault(x => x.Name == machineName);
-
-                if (existing != null)
+                if (await authorizationService.AuthorizeAsync(User,
+                    new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.WriteAccess },
+                    new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
-                    machines.Remove(existing);
+                    var projectPath = Path.Combine(Folders.Projects, projectName);
 
-                    box.Machines = machines;
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                    var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box));
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
 
-                    System.IO.File.WriteAllText(configurationPath, jar);
+                    var box = Box.Box.Mistranslate(cfg);
 
-                    var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
-                    var username = nameClaim != null ? nameClaim.Value : "no name claim";
-                    var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
-                    var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                    var message = "Removed machine " + existing.Name + " from " + configurationName + " in " + projectName;
+                    var machines = box.Machines.ToList();
 
-                    var git = new Git(projectPath);
-                    git.Stage(new List<string>() { configurationPath });
-                    git.Commit(message, username, email);
-                    git.Push();
+                    var existing = machines.FirstOrDefault(x => x.Name == machineName);
+
+                    if (existing != null)
+                    {
+                        machines.Remove(existing);
+
+                        box.Machines = machines;
+
+                        var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box));
+
+                        System.IO.File.WriteAllText(configurationPath, jar);
+
+                        var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
+                        var username = nameClaim != null ? nameClaim.Value : "no name claim";
+                        var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
+                        var email = emailClaim != null ? emailClaim.Value : "no email claim";
+                        var message = "Removed machine " + existing.Name + " from " + configurationName + " in " + projectName;
+
+                        var git = new Git(projectPath);
+                        git.Stage(new List<string>() { configurationPath });
+                        git.Commit(message, username, email);
+                        git.Push();
+                    }
                 }
             }
             catch (Exception ex)

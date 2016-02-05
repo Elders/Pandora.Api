@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using Elders.Pandora.Box;
 using Microsoft.AspNet.Authorization;
+using Microsoft.AspNet.Authorization.Infrastructure;
 using Microsoft.AspNet.Mvc;
 using Newtonsoft.Json;
 
@@ -16,8 +18,15 @@ namespace Elders.Pandora.Server.Api.Controllers
     {
         static readonly log4net.ILog log = log4net.LogManager.GetLogger(typeof(DefaultsController));
 
+        IAuthorizationService authorizationService;
+
+        public DefaultsController(IAuthorizationService authorizationService)
+        {
+            this.authorizationService = authorizationService;
+        }
+
         [HttpGet("{projectName}/{configurationName}")]
-        public Configuration Get(string projectName, string configurationName)
+        public async Task<Dictionary<string, string>> Get(string projectName, string configurationName)
         {
             try
             {
@@ -30,7 +39,14 @@ namespace Elders.Pandora.Server.Api.Controllers
 
                 var box = Box.Box.Mistranslate(cfg);
 
-                return box.Defaults;
+                if (await authorizationService.AuthorizeAsync(User,
+                   new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.ReadAcccess },
+                   new OperationAuthorizationRequirement() { Name = "Read" }))
+                {
+                    return box.Defaults.AsDictionary();
+                }
+
+                return new Dictionary<string, string>();
             }
             catch (Exception ex)
             {
@@ -40,25 +56,32 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [HttpGet("{projectName}/{configurationName}/{defaultName}")]
-        public string Get(string projectName, string configurationName, string defaultName)
+        public async Task<string> Get(string projectName, string configurationName, string defaultName)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(defaultName))
                     return null;
 
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
+                if (await authorizationService.AuthorizeAsync(User,
+                  new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.ReadAcccess },
+                  new OperationAuthorizationRequirement() { Name = "Read" }))
+                {
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
 
-                var box = Box.Box.Mistranslate(cfg);
+                    var box = Box.Box.Mistranslate(cfg);
 
-                var setting = box.Defaults.AsDictionary().FirstOrDefault(x => x.Key == defaultName);
+                    var setting = box.Defaults.AsDictionary().FirstOrDefault(x => x.Key == defaultName);
 
-                if (string.IsNullOrWhiteSpace(setting.Value))
-                    throw new InvalidOperationException("There is no default setting with name " + defaultName);
-                else
-                    return setting.Value;
+                    if (string.IsNullOrWhiteSpace(setting.Value))
+                        throw new InvalidOperationException("There is no default setting with name " + defaultName);
+                    else
+                        return setting.Value;
+                }
+
+                return null;
             }
             catch (Exception ex)
             {
@@ -68,26 +91,77 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [HttpPost("{projectName}/{configurationName}")]
-        public void Post(string projectName, string configurationName, [FromBody]KeyValuePair<string, string> setting)
+        public async void Post(string projectName, string configurationName, [FromBody]KeyValuePair<string, string> setting)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
                     return;
 
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
-
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
-
-                var box = Box.Box.Mistranslate(cfg);
-
-                var defaults = box.Defaults.AsDictionary();
-
-                if (!defaults.ContainsKey(setting.Key))
+                if (await authorizationService.AuthorizeAsync(User,
+                    new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.WriteAccess },
+                    new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
-                    defaults.Add(setting.Key, setting.Value);
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                    box.Defaults = new Configuration(box.Defaults.Name, defaults);
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
+
+                    var box = Box.Box.Mistranslate(cfg);
+
+                    var defaults = box.Defaults.AsDictionary();
+
+                    if (!defaults.ContainsKey(setting.Key))
+                    {
+                        defaults.Add(setting.Key, setting.Value);
+
+                        box.Defaults = new Configuration(box.Defaults.Name, defaults);
+
+                        var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
+
+                        System.IO.File.WriteAllText(configurationPath, jar);
+
+                        var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
+                        var username = nameClaim != null ? nameClaim.Value : "no name claim";
+                        var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
+                        var email = emailClaim != null ? emailClaim.Value : "no email claim";
+                        var message = "Added setting " + setting.Key + " in " + configurationName + " in " + projectName;
+
+                        var projectPath = Path.Combine(Folders.Projects, projectName);
+                        var git = new Git(projectPath);
+                        git.Stage(new List<string>() { configurationPath });
+                        git.Commit(message, username, email);
+                        git.Push();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Fatal(ex);
+                throw;
+            }
+        }
+
+        [HttpPut("{projectName}/{configurationName}")]
+        public async void Put(string projectName, string configurationName, [FromBody]Dictionary<string, string> settings)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
+                    return;
+
+                if (await authorizationService.AuthorizeAsync(User,
+                  new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.WriteAccess },
+                  new OperationAuthorizationRequirement() { Name = "Write" }))
+                {
+                    var projectPath = Path.Combine(Folders.Projects, projectName);
+
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
+
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
+
+                    var box = Box.Box.Mistranslate(cfg);
+
+                    box.Defaults = new Configuration(box.Defaults.Name, settings);
 
                     var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
 
@@ -97,9 +171,8 @@ namespace Elders.Pandora.Server.Api.Controllers
                     var username = nameClaim != null ? nameClaim.Value : "no name claim";
                     var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
                     var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                    var message = "Added setting " + setting.Key + " in " + configurationName + " in " + projectName;
+                    var message = "Updated default settings in " + configurationName + " in " + projectName;
 
-                    var projectPath = Path.Combine(Folders.Projects, projectName);
                     var git = new Git(projectPath);
                     git.Stage(new List<string>() { configurationPath });
                     git.Commit(message, username, email);
@@ -113,94 +186,59 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
-        [HttpPut("{projectName}/{configurationName}")]
-        public void Put(string projectName, string configurationName, [FromBody]Dictionary<string, string> settings)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
-                    return;
-
-                var projectPath = Path.Combine(Folders.Projects, projectName);
-
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
-
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
-
-                var box = Box.Box.Mistranslate(cfg);
-
-                box.Defaults = new Configuration(box.Defaults.Name, settings);
-
-                var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box), Formatting.Indented);
-
-                System.IO.File.WriteAllText(configurationPath, jar);
-
-                var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
-                var username = nameClaim != null ? nameClaim.Value : "no name claim";
-                var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
-                var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                var message = "Updated default settings in " + configurationName + " in " + projectName;
-
-                var git = new Git(projectPath);
-                git.Stage(new List<string>() { configurationPath });
-                git.Commit(message, username, email);
-                git.Push();
-            }
-            catch (Exception ex)
-            {
-                log.Fatal(ex);
-                throw;
-            }
-        }
-
         [HttpDelete("{projectName}/{configurationName}/{key}")]
-        public void Delete(string projectName, string configurationName, string key)
+        public async void Delete(string projectName, string configurationName, string key)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
                     return;
 
-                var projectPath = Path.Combine(Folders.Projects, projectName);
-
-                var configurationPath = GetConfigurationFile(projectName, configurationName);
-
-                var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
-
-                var box = Box.Box.Mistranslate(cfg);
-
-                var defaults = box.Defaults.AsDictionary();
-
-                if (defaults.ContainsKey(key))
+                if (await authorizationService.AuthorizeAsync(User,
+                  new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.WriteAccess },
+                  new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
-                    defaults.Remove(key);
+                    var projectPath = Path.Combine(Folders.Projects, projectName);
 
-                    box.Defaults = new Configuration(box.Defaults.Name, defaults);
+                    var configurationPath = GetConfigurationFile(projectName, configurationName);
 
-                    foreach (var cluster in box.Clusters)
+                    var cfg = JsonConvert.DeserializeObject<Jar>(System.IO.File.ReadAllText(configurationPath));
+
+                    var box = Box.Box.Mistranslate(cfg);
+
+                    var defaults = box.Defaults.AsDictionary();
+
+                    if (defaults.ContainsKey(key))
                     {
-                        cluster.DeleteKey(key);
+                        defaults.Remove(key);
+
+                        box.Defaults = new Configuration(box.Defaults.Name, defaults);
+
+                        foreach (var cluster in box.Clusters)
+                        {
+                            cluster.DeleteKey(key);
+                        }
+
+                        foreach (var machine in box.Machines)
+                        {
+                            machine.DeleteKey(key);
+                        }
+
+                        var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box));
+
+                        System.IO.File.WriteAllText(configurationPath, jar);
+
+                        var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
+                        var username = nameClaim != null ? nameClaim.Value : "no name claim";
+                        var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
+                        var email = emailClaim != null ? emailClaim.Value : "no email claim";
+                        var message = "Removed setting " + key + " from " + configurationName + " in " + projectName;
+
+                        var git = new Git(projectPath);
+                        git.Stage(new List<string>() { configurationPath });
+                        git.Commit(message, username, email);
+                        git.Push();
                     }
-
-                    foreach (var machine in box.Machines)
-                    {
-                        machine.DeleteKey(key);
-                    }
-
-                    var jar = JsonConvert.SerializeObject(Box.Box.Mistranslate(box));
-
-                    System.IO.File.WriteAllText(configurationPath, jar);
-
-                    var nameClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "name");
-                    var username = nameClaim != null ? nameClaim.Value : "no name claim";
-                    var emailClaim = ClaimsPrincipal.Current.Identities.First().Claims.SingleOrDefault(x => x.Type == "email");
-                    var email = emailClaim != null ? emailClaim.Value : "no email claim";
-                    var message = "Removed setting " + key + " from " + configurationName + " in " + projectName;
-
-                    var git = new Git(projectPath);
-                    git.Stage(new List<string>() { configurationPath });
-                    git.Commit(message, username, email);
-                    git.Push();
                 }
             }
             catch (Exception ex)

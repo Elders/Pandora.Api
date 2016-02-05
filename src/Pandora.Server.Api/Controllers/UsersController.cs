@@ -8,7 +8,7 @@ using Newtonsoft.Json;
 
 namespace Elders.Pandora.Server.Api.Controllers
 {
-    [Authorize]
+    [Authorize(Roles = "superAdmin")]
     [Route("api/[controller]")]
     public class UsersController : Controller
     {

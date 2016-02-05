@@ -7,12 +7,12 @@ using Microsoft.AspNet.Mvc;
 
 namespace Elders.Pandora.Server.Api.Controllers
 {
-    [Authorize]
     [Route("api/[controller]")]
     public class ProjectsController : Controller
     {
         static readonly log4net.ILog log = log4net.LogManager.GetLogger(typeof(ProjectsController));
 
+        [Authorize]
         [HttpGet]
         public List<string> Get()
         {
@@ -21,6 +21,7 @@ namespace Elders.Pandora.Server.Api.Controllers
             return projects.Where(x => x != ".git").ToList();
         }
 
+        [Authorize(Roles = "superAdmin")]
         [HttpPost("{projectName}/{gitUrl}")]
         public void Post(string projectName, string gitUrl)
         {
@@ -58,6 +59,7 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
+        [Authorize(Roles = "superAdmin")]
         [HttpDelete("{projectName}")]
         public void Delete(string projectName)
         {
@@ -71,6 +73,7 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
+        [Authorize(Roles = "superAdmin")]
         [HttpPost("{projectName}")]
         public void Update(string projectName)
         {

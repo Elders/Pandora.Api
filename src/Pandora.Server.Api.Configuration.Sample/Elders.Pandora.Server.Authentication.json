@@ -1,0 +1,19 @@
+﻿{
+    "name": "Elders.Pandora.Server.Authentication",
+    "defaults": {
+        "audience": "",
+        "issuer": ""
+    },
+    "clusters": {
+        "local": {
+            "audience": "",
+            "issuer": ""
+        }
+    },
+    "machines": {
+         "machine-name": {
+            "audience": "",
+            "issuer": ""
+         }
+    }
+}
