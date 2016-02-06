@@ -147,21 +147,23 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
-        [HttpPost("{projectName}/{configurationName}")]
-        public async void Post(string projectName, string configurationName, [FromBody]string value)
+        [HttpPost("{projectName}/{configurationName}/{clusterName}")]
+        public async void Post(string projectName, string configurationName, string clusterName, [FromBody]string value)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
+                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(clusterName))
                     return;
 
-                var newCluster = JsonConvert.DeserializeObject<Cluster>(value);
+                var settings = JsonConvert.DeserializeObject<Dictionary<string, string>>(value);
+
+                var newCluster = new Cluster(clusterName, settings);
 
                 if (newCluster == null)
                     return;
 
                 if (await authorizationService.AuthorizeAsync(User,
-                      new Resource() { ProjectName = projectName, ConfigurationName = configurationName, ClusterName = newCluster.Name, Access = ViewModels.Access.WriteAccess },
+                      new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.WriteAccess },
                       new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
                     var projectPath = Path.Combine(Folders.Projects, projectName);
@@ -205,15 +207,17 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
-        [HttpPut("{projectName}/{configurationName}")]
-        public async void Put(string projectName, string configurationName, [FromBody]string value)
+        [HttpPut("{projectName}/{configurationName}/{clusterName}")]
+        public async void Put(string projectName, string configurationName, string clusterName, [FromBody]string value)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
+                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(clusterName))
                     return;
 
-                var newCluster = JsonConvert.DeserializeObject<Cluster>(value);
+                var settings = JsonConvert.DeserializeObject<Dictionary<string, string>>(value);
+
+                var newCluster = new Cluster(clusterName, settings);
 
                 if (newCluster == null)
                     return;

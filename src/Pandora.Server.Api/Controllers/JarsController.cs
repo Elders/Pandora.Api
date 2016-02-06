@@ -82,7 +82,7 @@ namespace Elders.Pandora.Server.Api.Controllers
 
         [Authorize(Roles = "superAdmin")]
         [HttpGet("{projectName}/{configurationName}")]
-        public Jar Get(string projectName, string configurationName)
+        public async Task<Jar> Get(string projectName, string configurationName)
         {
             try
             {
@@ -237,9 +237,6 @@ namespace Elders.Pandora.Server.Api.Controllers
 
             if (configurationPath.EndsWith(".json", StringComparison.Ordinal) == false)
                 configurationPath += ".json";
-
-            if (System.IO.File.Exists(configurationPath) == false)
-                throw new InvalidOperationException("There is no configuration file: " + configurationName);
 
             return configurationPath;
         }

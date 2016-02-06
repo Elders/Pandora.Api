@@ -103,18 +103,18 @@ namespace Elders.Pandora.Server.Api.Controllers
             return null;
         }
 
-        [HttpPost("{projectName}/{configurationName}")]
-        public async void Post(string projectName, string configurationName, [FromBody]string value)
+        [HttpPost("{projectName}/{configurationName}/{machineName}")]
+        public async void Post(string projectName, string configurationName, string machineName, [FromBody]string value)
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(machineName))
+                    return;
+
                 if (await authorizationService.AuthorizeAsync(User,
                     new Resource() { ProjectName = projectName, ConfigurationName = configurationName, Access = ViewModels.Access.WriteAccess },
                     new OperationAuthorizationRequirement() { Name = "Write" }))
                 {
-                    if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
-                        return;
-
                     var projectPath = Path.Combine(Folders.Projects, projectName);
 
                     var configurationPath = GetConfigurationFile(projectName, configurationName);
@@ -123,7 +123,9 @@ namespace Elders.Pandora.Server.Api.Controllers
 
                     var box = Box.Box.Mistranslate(cfg);
 
-                    var newMachine = JsonConvert.DeserializeObject<Machine>(value);
+                    var settings = JsonConvert.DeserializeObject<Dictionary<string, string>>(value);
+
+                    var newMachine = new Machine(machineName, settings);
 
                     var machines = box.Machines.ToList();
 
@@ -157,12 +159,12 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
-        [HttpPut("{projectName}/{configurationName}")]
-        public async void Put(string projectName, string configurationName, [FromBody]string value)
+        [HttpPut("{projectName}/{configurationName}/{machineName}")]
+        public async void Put(string projectName, string configurationName, string machineName, [FromBody]string value)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName))
+                if (string.IsNullOrWhiteSpace(configurationName) || string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(machineName))
                     return;
 
                 if (await authorizationService.AuthorizeAsync(User,
@@ -177,7 +179,9 @@ namespace Elders.Pandora.Server.Api.Controllers
 
                     var box = Box.Box.Mistranslate(cfg);
 
-                    var newMachine = JsonConvert.DeserializeObject<Machine>(value);
+                    var settings = JsonConvert.DeserializeObject<Dictionary<string, string>>(value);
+
+                    var newMachine = new Machine(machineName, settings);
 
                     var machines = box.Machines.ToList();
 
