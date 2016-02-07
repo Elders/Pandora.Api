@@ -23,7 +23,7 @@
     "Pandora": "1.0.0-beta0001"
   },
   "commands": {
-    "web": "Microsoft.AspNet.Server.Kestrel"
+    "web": "Microsoft.AspNet.Server.Kestrel  --server.urls http://*:5000"
   },
   "frameworks": {
     "dnx46": { }
