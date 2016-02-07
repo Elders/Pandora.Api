@@ -174,6 +174,7 @@ namespace Elders.Pandora.Server.Api
         {
             // Set up configuration sources.
             var builder = new ConfigurationBuilder()
+                .AddJsonFile("appsettings.json")
                 .AddEnvironmentVariables();
             Configuration = builder.Build();
         }
@@ -194,6 +195,9 @@ namespace Elders.Pandora.Server.Api
             app.UseIISPlatformHandler();
 
             ApplicationConfiguration.SetContext("Elders.Pandora.Server.Api");
+
+            loggerFactory.AddConsole(Configuration.GetSection("Logging"));
+            loggerFactory.AddDebug();
 
             foreach (var directory in new[] { Folders.Main, Folders.Users, Folders.Projects })
             {
