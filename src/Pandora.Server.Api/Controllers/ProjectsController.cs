@@ -22,8 +22,8 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [Authorize(Roles = "superAdmin")]
-        [HttpPost("{projectName}/{gitUrl}")]
-        public void Post(string projectName, string gitUrl)
+        [HttpPost("{projectName}")]
+        public void Post(string projectName, [FromBody]string gitUrl)
         {
             var workingDir = Path.Combine(Folders.Projects, projectName);
 
@@ -74,7 +74,7 @@ namespace Elders.Pandora.Server.Api.Controllers
         }
 
         [Authorize(Roles = "superAdmin")]
-        [HttpPost("{projectName}")]
+        [HttpPut("Update/{projectName}")]
         public void Update(string projectName)
         {
             try
