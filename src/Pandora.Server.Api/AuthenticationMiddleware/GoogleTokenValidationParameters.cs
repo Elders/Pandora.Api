@@ -6,11 +6,14 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Collections.Concurrent;
 
 namespace Elders.Pandora.Server.Api.AuthenticationMiddleware
 {
     public class GoogleTokenValidationParameters
     {
+        private static ConcurrentDictionary<DateTime, List<X509SecurityKey>> securityKeys = new ConcurrentDictionary<DateTime, List<X509SecurityKey>>();
+
         public static TokenValidationParameters GetParameters()
         {
             var tvp = new TokenValidationParameters();
@@ -20,32 +23,40 @@ namespace Elders.Pandora.Server.Api.AuthenticationMiddleware
             tvp.ValidateAudience = true;
             tvp.ValidateIssuerSigningKey = true;
             tvp.ValidateLifetime = true;
-
-            var keys = new List<X509SecurityKey>();
-            var certs = GetCertificates();
-
-            foreach (var certificate in certs)
-            {
-                var key = new X509SecurityKey(certificate);
-                keys.Add(key);
-            }
-
-            tvp.IssuerSigningKeyResolver = (a, b, c, d) => keys;
-
+            tvp.IssuerSigningKeyResolver = (a, b, c, d) => GetCertificates();
             return tvp;
         }
 
         // Used for string parsing the Certificates from Google
         private const string beginCert = "-----BEGIN CERTIFICATE-----\\n";
         private const string endCert = "\\n-----END CERTIFICATE-----\\n";
-        private static List<X509Certificate2> GetCertificates()
+        private static List<X509SecurityKey> GetCertificates()
         {
+            var expiration = DateTime.UtcNow.AddMinutes(10);
+
+            var expired = securityKeys.ToList().Where(x => x.Key < expiration);
+            foreach (var item in expired)
+            {
+                List<X509SecurityKey> expiredKeys;
+                securityKeys.TryRemove(item.Key, out expiredKeys);
+            }
+
+            var active = securityKeys.ToList().Where(x => x.Key > DateTime.UtcNow).OrderByDescending(x => x.Key);
+            if (active.Count() > 0)
+                return active.FirstOrDefault().Value;
+
             // The request will be made to the authentication server.
             WebRequest request = WebRequest.Create(
                 "https://www.googleapis.com/oauth2/v1/certs"
             );
 
-            StreamReader reader = new StreamReader(request.GetResponse().GetResponseStream());
+            var response = request.GetResponse();
+
+            var expirationDateHeader = response.Headers["expires"];
+
+            var certificateExpirationDate = DateTime.Parse(expirationDateHeader).ToUniversalTime();
+
+            StreamReader reader = new StreamReader(response.GetResponseStream());
 
             string responseFromServer = reader.ReadToEnd();
 
@@ -65,7 +76,20 @@ namespace Elders.Pandora.Server.Api.AuthenticationMiddleware
                     index++;
                 }
             }
-            return certBytes.Select(x => new X509Certificate2(x)).ToList();
+
+            var certs = certBytes.Select(x => new X509Certificate2(x)).ToList();
+
+            var keys = new List<X509SecurityKey>();
+
+            foreach (var cert in certs)
+            {
+                var key = new X509SecurityKey(cert);
+                keys.Add(key);
+            }
+
+            securityKeys.TryAdd(certificateExpirationDate, keys);
+
+            return keys;
         }
     }
 }
