@@ -219,7 +219,7 @@ namespace Elders.Pandora.Server.Api.Controllers
             }
         }
 
-        [HttpDelete("{projectName}/{configurationName}")]
+        [HttpDelete("{projectName}/{configurationName}/{machineName}")]
         public async void Delete(string projectName, string configurationName, string machineName)
         {
             try
