@@ -15,6 +15,9 @@
     4. Select "Web application"
     5. Enter "Pandora" as a name
     6. Copy the client id and the client secret and stick them ... somewhere safe
+    7. Go to "Overview" (on the left side panel)
+    8. Click on "Google+ API"
+    9. Click "Enable"
 
 1. Clone the repository from `git@github.com:Elders/Pandora.Server.Api.git` or `https://github.com/Elders/Pandora.Server.Api.git`
 2. Go to `Pandora.Server.Api\src` and create a copy of the `Pandora.Server.Api.Configuration.Sample` folder
@@ -43,5 +46,5 @@
 
 6. Open a cmd window as an administrator in the repository directory and execute the `set_variables-as-admin.bat` script
 7. Execute `dnu restore`
-8. Execute `build.cmd`
+8. Execute `run.cmd`
 9. Happy coding!
