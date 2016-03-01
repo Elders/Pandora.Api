@@ -44,7 +44,7 @@
     - Set your machine name in the configuration
     - Set your email as a `super_admin_users` (the same you used for creating credentials)
 
-6. Ensure that you have an environment variabe 'CLUSTER_NAME' with value 'local'
+6. Ensure that you have an environment variabe `CLUSTER_NAME` with value `local`
 7. Open a cmd window as an administrator in the repository directory and execute the `set_variables-as-admin.bat` script
 8. Execute `dnu restore`
 9. Execute `run.cmd`
