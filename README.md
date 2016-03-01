@@ -6,7 +6,7 @@
 - ASP.NET 5
 - HttpPlatformHandler v1.2 - http://www.iis.net/downloads/microsoft/httpplatformhandler#additionalDownloads (use the additional downloads section)
 
-
+- - -
     Create google credentials for Pandora on https://console.developers.google.com
     (You can skip this step if you've already did it)
     1. Click on "Use Google APIs"
