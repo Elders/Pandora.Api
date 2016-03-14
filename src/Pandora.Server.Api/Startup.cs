@@ -192,6 +192,13 @@ namespace Elders.Pandora.Server.Api
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory)
         {
+            app.UseCors((builder) =>
+            {
+                builder.AllowAnyMethod();
+                builder.AllowAnyHeader();
+                builder.AllowAnyOrigin();
+            });
+
             app.UseIISPlatformHandler();
 
             ApplicationConfiguration.SetContext("Elders.Pandora.Server.Api");
